@@ -1,0 +1,85 @@
+version: '2'
+services:
+  # MongoDB: https://hub.docker.com/_/mongo/
+  mongodb:
+    image: harbor.moravia.com/mirror/library/mongo:4.2
+    container_name: Mongo_DB
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+  # Elasticsearch: https://www.elastic.co/guide/en/elasticsearch/reference/7.10/docker.html
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+    container_name: Elasticsearch
+    restart: always
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    environment:
+      - http.host=0.0.0.0
+      - transport.host=localhost
+      - network.host=0.0.0.0
+      # This needs to be tuned so Elastic can use proper ammount of memory, good value should be half of VM RAM
+      # Ej: - "ES_JAVA_OPTS=-Xms6g -Xmx6g" if server has 12GB of RAM
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    # This needs to be tuned according VM RAM:
+    # Ej: mem_limit: 12g 
+    mem_limit: 1g
+  # Graylog: https://hub.docker.com/r/graylog/graylog/
+  graylog:
+    # Make sure you update this line to latest Image available at the time of starting the server for the first time.
+    image: harbor.moravia.com/mirror/graylog/graylog:4.2.5
+    container_name: Graylog
+    restart: always
+    volumes:
+      - graylog_data:/usr/share/graylog/data
+    environment:
+      # CHANGE ME (must be at least 16 characters)! - Created with "pwgen -N 1 -s 96"
+      # Ej: - GRAYLOG_PASSWORD_SECRET=jgjpXVEB2acMGobWnrQ47zAqRaUxapw55PhHC6GrgECgCS72nbPSSU6QQwdG5YVY8OepApQFiMEEEEaYpI8hA0wWVwXY1sa2
+      - GRAYLOG_PASSWORD_SECRET={The Secret}
+      # Password: admin - Created with "echo -n "Enter Password: " && head -1 </dev/stdin | tr -d '\n' | sha256sum | cut -d" " -f1"
+      # Ej: - GRAYLOG_ROOT_PASSWORD_SHA2=u6c39254d312cdb7829csbac14287868labaf4e1f35ee833bf589b7d4984b4uq
+      - GRAYLOG_ROOT_PASSWORD_SHA2={The Password}
+      - GRAYLOG_HTTP_EXTERNAL_URI=http://graylog:9000/
+    entrypoint: /usr/bin/tini -- wait-for-it elasticsearch:9200 --  /docker-entrypoint.sh
+    links:
+      - mongodb:mongo
+      - elasticsearch
+    depends_on:
+      - mongodb
+      - elasticsearch
+    ports:
+      # Graylog web interface and REST API
+      #- 9000:9000
+      # Syslog TCP
+      - 1514:1514
+      # Syslog UDP
+      - 1514:1514/udp
+      # GELF TCP
+      - 12201:12201
+      # GELF UDP
+      - 6668:6668/udp
+
+  ngx:
+    image: harbor.moravia.com/mirror/library/nginx
+    container_name: Nginx
+    restart: always
+    depends_on:
+      - graylog
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - /opt/docker/certs:/ssl
+
+# Volumes for persisting data, see https://docs.docker.com/engine/admin/volumes/volumes/
+volumes:
+  mongo_data:
+    driver: local
+  es_data:
+    driver: local
+  graylog_data:
+    driver: local
